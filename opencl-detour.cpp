@@ -32,6 +32,12 @@
 #define GetFunctionAddr(h,name) dlsym(h,name)
 #endif
 
+#ifdef __APPLE__
+#define FMTU64 "%llu"
+#else
+#define FMTU64 "%lu"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -910,7 +916,7 @@ clGetDeviceIDs(cl_platform_id    platform ,
     if(!api.clGetDeviceIDs) return CL_INVALID_OPERATION;
     else {
         cl_int v = api.clGetDeviceIDs(platform,device_type,num_entries,devices,num_devices);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clGetDeviceIDs(%p, %llu, %u, %p, %p) => %d\n", platform, device_type, num_entries, devices, num_devices, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clGetDeviceIDs(%p, " FMTU64 ", %u, %p, %p) => %d\n", platform, device_type, num_entries, devices, num_devices, v);
         return v;
     }
 }
@@ -999,7 +1005,7 @@ clCreateContextFromType(const cl_context_properties *  properties ,
     if(!api.clCreateContextFromType) return 0;
     else {
         cl_context v = api.clCreateContextFromType(properties,device_type,pfn_notify,user_data,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateContextFromType(%p, %llu, %p, %p, %p) => %p\n", properties, device_type, pfn_notify, user_data, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateContextFromType(%p, " FMTU64 ", %p, %p, %p) => %p\n", properties, device_type, pfn_notify, user_data, errcode_ret, v);
         return v;
     }
 }
@@ -1054,7 +1060,7 @@ clCreateCommandQueue(cl_context                      context ,
     if(!api.clCreateCommandQueue) return 0;
     else {
         cl_command_queue v = api.clCreateCommandQueue(context,device,properties,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateCommandQueue(%p, %p, %llu, %p) => %p\n", context, device, properties, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateCommandQueue(%p, %p, " FMTU64 ", %p) => %p\n", context, device, properties, errcode_ret, v);
         return v;
     }
 }
@@ -1110,7 +1116,7 @@ clCreateBuffer(cl_context    context ,
     if(!api.clCreateBuffer) return 0;
     else {
         cl_mem v = api.clCreateBuffer(context,flags,size,host_ptr,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateBuffer(%p, %llu, %lu, %p, %p) => %p\n", context, flags, size, host_ptr, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateBuffer(%p, " FMTU64 ", %lu, %p, %p) => %p\n", context, flags, size, host_ptr, errcode_ret, v);
         return v;
     }
 }
@@ -1126,7 +1132,7 @@ clCreateSubBuffer(cl_mem                    buffer ,
     if(!api.clCreateSubBuffer) return 0;
     else {
         cl_mem v = api.clCreateSubBuffer(buffer,flags,buffer_create_type,buffer_create_info,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateSubBuffer(%p, %llu, %u, {%ld,%ld}, %p) => %p\n", buffer, flags, buffer_create_type, ((const cl_buffer_region *)buffer_create_info)->origin, ((const cl_buffer_region *)buffer_create_info)->size, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateSubBuffer(%p, " FMTU64 ", %u, {%ld,%ld}, %p) => %p\n", buffer, flags, buffer_create_type, ((const cl_buffer_region *)buffer_create_info)->origin, ((const cl_buffer_region *)buffer_create_info)->size, errcode_ret, v);
         return v;
     }
 }
@@ -1143,7 +1149,7 @@ clCreateImage(cl_context               context ,
     if(!api.clCreateImage) return 0;
     else {
         cl_mem v = api.clCreateImage(context,flags,image_format,image_desc,host_ptr,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateImage(%p, %llu, %p, %p, %p, %p) => %p\n", context, flags, image_format, image_desc, host_ptr, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateImage(%p, " FMTU64 ", %p, %p, %p, %p) => %p\n", context, flags, image_format, image_desc, host_ptr, errcode_ret, v);
         return v;
     }
 }
@@ -1184,7 +1190,7 @@ clGetSupportedImageFormats(cl_context            context ,
     if(!api.clGetSupportedImageFormats) return CL_INVALID_OPERATION;
     else {
         cl_int v = api.clGetSupportedImageFormats(context,flags,image_type,num_entries,image_formats,num_image_formats);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clGetSupportedImageFormats(%p, %llu, %u, %u, %p, %p) => %d\n", context, flags, image_type, num_entries, image_formats, num_image_formats, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clGetSupportedImageFormats(%p, " FMTU64 ", %u, %u, %p, %p) => %d\n", context, flags, image_type, num_entries, image_formats, num_image_formats, v);
         return v;
     }
 }
@@ -2026,7 +2032,7 @@ clEnqueueMapBuffer(cl_command_queue  command_queue ,
     if(!api.clEnqueueMapBuffer) return 0;
     else {
         void * v = api.clEnqueueMapBuffer(command_queue,buffer,blocking_map,map_flags,offset,size,num_events_in_wait_list,event_wait_list,event,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clEnqueueMapBuffer(%p, %p, %d, %llu, %lu, %lu, %u, %p, %p, %p) => %p\n", command_queue, buffer, blocking_map, map_flags, offset, size, num_events_in_wait_list, event_wait_list, event, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clEnqueueMapBuffer(%p, %p, %d, " FMTU64 ", %lu, %lu, %u, %p, %p, %p) => %p\n", command_queue, buffer, blocking_map, map_flags, offset, size, num_events_in_wait_list, event_wait_list, event, errcode_ret, v);
         return v;
     }
 }
@@ -2049,7 +2055,7 @@ clEnqueueMapImage(cl_command_queue   command_queue ,
     if(!api.clEnqueueMapImage) return 0;
     else {
         void * v = api.clEnqueueMapImage(command_queue,image,blocking_map,map_flags,origin,region,image_row_pitch,image_slice_pitch,num_events_in_wait_list,event_wait_list,event,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clEnqueueMapImage(%p, %p, %d, %llu, %p, %p, %p, %p, %u, %p, %p, %p) => %p\n", command_queue, image, blocking_map, map_flags, origin, region, image_row_pitch, image_slice_pitch, num_events_in_wait_list, event_wait_list, event, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clEnqueueMapImage(%p, %p, %d, " FMTU64 ", %p, %p, %p, %p, %u, %p, %p, %p) => %p\n", command_queue, image, blocking_map, map_flags, origin, region, image_row_pitch, image_slice_pitch, num_events_in_wait_list, event_wait_list, event, errcode_ret, v);
         return v;
     }
 }
@@ -2084,7 +2090,7 @@ clEnqueueMigrateMemObjects(cl_command_queue        command_queue ,
     if(!api.clEnqueueMigrateMemObjects) return CL_INVALID_OPERATION;
     else {
         cl_int v = api.clEnqueueMigrateMemObjects(command_queue,num_mem_objects,mem_objects,flags,num_events_in_wait_list,event_wait_list,event);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clEnqueueMigrateMemObjects(%p, %u, %p, %llu, %u, %p, %p) => %d\n", command_queue, num_mem_objects, mem_objects, flags, num_events_in_wait_list, event_wait_list, event, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clEnqueueMigrateMemObjects(%p, %u, %p, " FMTU64 ", %u, %p, %p) => %d\n", command_queue, num_mem_objects, mem_objects, flags, num_events_in_wait_list, event_wait_list, event, v);
         return v;
     }
 }
@@ -2203,7 +2209,7 @@ clCreateImage2D(cl_context               context ,
     if(!api.clCreateImage2D) return 0;
     else {
         cl_mem v = api.clCreateImage2D(context,flags,image_format,image_width,image_height,image_row_pitch,host_ptr,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateImage2D(%p, %llu, %p, %lu, %lu, %lu, %p, %p) => %p\n", context, flags, image_format, image_width, image_height, image_row_pitch, host_ptr, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateImage2D(%p, " FMTU64 ", %p, %lu, %lu, %lu, %p, %p) => %p\n", context, flags, image_format, image_width, image_height, image_row_pitch, host_ptr, errcode_ret, v);
         return v;
     }
 }
@@ -2224,7 +2230,7 @@ clCreateImage3D(cl_context               context ,
     if(!api.clCreateImage3D) return 0;
     else {
         cl_mem v = api.clCreateImage3D(context,flags,image_format,image_width,image_height,image_depth,image_row_pitch,image_slice_pitch,host_ptr,errcode_ret);
-        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateImage3D(%p, %llu, %p, %lu, %lu, %lu, %lu, %lu, %p, %p) => %p\n", context, flags, image_format, image_width, image_height, image_depth, image_row_pitch, image_slice_pitch, host_ptr, errcode_ret, v);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateImage3D(%p, " FMTU64 ", %p, %lu, %lu, %lu, %lu, %lu, %p, %p) => %p\n", context, flags, image_format, image_width, image_height, image_depth, image_row_pitch, image_slice_pitch, host_ptr, errcode_ret, v);
         return v;
     }
 }
