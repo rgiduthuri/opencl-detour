@@ -1,3 +1,7 @@
+# Source: https://github.com/rgiduthuri/opencl-detour
+# Author: Radhakrishna Giduthuri
+# Date: Aug 26, 2017
+
 import os
 import sys
 
@@ -39,7 +43,10 @@ inputLogFile = sys.argv[pos]
 handleType = 'Handle_' + jobName
 
 # create output files
-print('OK: generating ' + outputFolder + '/' + jobName + '_job.cpp,  ' + jobName + '_job.h, ' + jobName + '_main.cpp, and CMakeLists.txt files')
+print('OK: creating ' + outputFolder + '/' + jobName + '_job.h')
+print('OK: creating ' + outputFolder + '/' + jobName + '_job.cpp')
+print('OK: creating ' + outputFolder + '/' + jobName + '_main.cpp')
+print('OK: creating ' + outputFolder + '/CMakeLists.txt')
 if outputFolder != '.':
     os.system('mkdir -p ' + outputFolder)
 fpH = open(outputFolder + '/' + jobName + '_job.h', 'w')
@@ -626,3 +633,5 @@ fpH.close()
 fpC.close()
 fpM.close()
 fpB.close()
+
+print('OK: good luck!')
