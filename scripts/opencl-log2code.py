@@ -94,8 +94,11 @@ GenerateName.count = 0
 enableNDRange = True
 if skipTillToken != '':
     enableNDRange = False
+lineno = 0
 for line in open(inputLogFile, 'r'):
     line = line.strip()
+    lineno = lineno + 1
+    line = line.replace('(nil)', '0x0')
     if (skipTillToken != '') and ('OPENCL-TRACE: ' + skipTillToken in line):
         enableNDRange = True
     elif 'OPENCL-TRACE: clCreateCommandQueue' in line:
@@ -494,8 +497,9 @@ fpM.write('    ERRCHK_ERERR(clGetPlatformIDs(1, &platform_id, NULL));\n')
 fpM.write('    cl_context_properties ctxprop[] = { CL_CONTEXT_PLATFORM, (cl_context_properties)platform_id, 0, 0 };\n')
 fpM.write('    cl_context ctx = clCreateContextFromType(ctxprop, CL_DEVICE_TYPE_GPU, NULL, NULL, &err);\n')
 fpM.write('    ERRCHK_ERERR(err);\n')
-fpM.write('    cl_device_id device_id;\n')
-fpM.write('    ERRCHK_ERERR(clGetContextInfo(ctx, CL_CONTEXT_DEVICES, sizeof(device_id), &device_id, NULL));\n')
+fpM.write('    cl_device_id device_list[16] = { 0 };\n')
+fpM.write('    ERRCHK_ERERR(clGetContextInfo(ctx, CL_CONTEXT_DEVICES, sizeof(device_list), device_list, NULL));\n')
+fpM.write('    cl_device_id device_id = device_list[0];\n')
 fpM.write('#if defined(CL_VERSION_2_0)\n')
 fpM.write('    cl_command_queue cmdq = clCreateCommandQueueWithProperties(ctx, device_id, NULL, &err);\n')
 fpM.write('    ERRCHK_ERERR(err);\n')

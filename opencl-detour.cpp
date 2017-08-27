@@ -6,13 +6,13 @@
 #define OPENCL_TRACE_ENV_NAME "OPENCL_DUMP_FLAGS"
 #endif
 
-#ifndef OPENCL_LIBRARY
+#ifndef OPENCL_TRACE_LIBRARY
 #if defined(_WIN32)
-#define OPENCL_LIBRARY "OpenCL.dll"
+#define OPENCL_TRACE_LIBRARY "OpenCL.dll"
 #elif defined(__APPLE__)
-#define OPENCL_LIBRARY "/System/Library/Frameworks/OpenCL.framework/Versions/A/OpenCL"
+#define OPENCL_TRACE_LIBRARY "/System/Library/Frameworks/OpenCL.framework/Versions/A/OpenCL"
 #else
-#define OPENCL_LIBRARY "libOpenCL.so"
+#define OPENCL_TRACE_LIBRARY "/opt/rocm/opencl/lib/x86_64/libOpenCL.so"
 #endif
 #endif
 
@@ -114,6 +114,14 @@ __clCreateCommandQueue(cl_context                     /* context */,
                      cl_device_id                   /* device */,
                      cl_command_queue_properties    /* properties */,
                      cl_int *                       /* errcode_ret */);
+
+#if defined(CL_VERSION_2_0)
+typedef CL_API_ENTRY cl_command_queue CL_API_CALL
+__clCreateCommandQueueWithProperties(cl_context               /* context */,
+                                   cl_device_id             /* device */,
+                                   const cl_queue_properties *    /* properties */,
+                                   cl_int *                 /* errcode_ret */);
+#endif
 
 typedef CL_API_ENTRY cl_int CL_API_CALL
 __clRetainCommandQueue(cl_command_queue /* command_queue */);
@@ -686,6 +694,9 @@ typedef struct {
     __clReleaseContext                         * clReleaseContext;
     __clGetContextInfo                         * clGetContextInfo;
     __clCreateCommandQueue                     * clCreateCommandQueue;
+#if defined(CL_VERSION_2_0)
+    __clCreateCommandQueueWithProperties       * clCreateCommandQueueWithProperties;
+#endif
     __clRetainCommandQueue                     * clRetainCommandQueue;
     __clReleaseCommandQueue                    * clReleaseCommandQueue;
     __clGetCommandQueueInfo                    * clGetCommandQueueInfo;
@@ -769,10 +780,11 @@ static OpenCLAPI api = { 0 };
 CL_API_ENTRY cl_int CL_API_CALL
 clInit(void)
 {
+printf("LOADING ... %s\n", OPENCL_TRACE_LIBRARY);
 #if defined(_WIN32)
-    if((api.h = LoadLibrary(TEXT(OPENCL_LIBRARY))) == NULL) return CL_INVALID_PLATFORM;
+    if((api.h = LoadLibrary(TEXT(OPENCL_TRACE_LIBRARY))) == NULL) return CL_INVALID_PLATFORM;
 #else
-    if((api.h = dlopen(OPENCL_LIBRARY, RTLD_NOW)) == NULL) return CL_INVALID_PLATFORM;
+    if((api.h = dlopen(OPENCL_TRACE_LIBRARY, RTLD_NOW)) == NULL) return CL_INVALID_PLATFORM;
 #endif
 
 #if defined(_WIN32)
@@ -796,6 +808,9 @@ clInit(void)
     api.clReleaseContext                         = (__clReleaseContext                         *) GetFunctionAddr(api.h, "clReleaseContext");
     api.clGetContextInfo                         = (__clGetContextInfo                         *) GetFunctionAddr(api.h, "clGetContextInfo");
     api.clCreateCommandQueue                     = (__clCreateCommandQueue                     *) GetFunctionAddr(api.h, "clCreateCommandQueue");
+#if defined(CL_VERSION_2_0)
+    api.clCreateCommandQueueWithProperties       = (__clCreateCommandQueueWithProperties       *) GetFunctionAddr(api.h, "clCreateCommandQueueWithProperties");
+#endif
     api.clRetainCommandQueue                     = (__clRetainCommandQueue                     *) GetFunctionAddr(api.h, "clRetainCommandQueue");
     api.clReleaseCommandQueue                    = (__clReleaseCommandQueue                    *) GetFunctionAddr(api.h, "clReleaseCommandQueue");
     api.clGetCommandQueueInfo                    = (__clGetCommandQueueInfo                    *) GetFunctionAddr(api.h, "clGetCommandQueueInfo");
@@ -1064,6 +1079,23 @@ clCreateCommandQueue(cl_context                      context ,
         return v;
     }
 }
+
+#if defined(CL_VERSION_2_0)
+CL_API_ENTRY cl_command_queue CL_API_CALL
+clCreateCommandQueueWithProperties(cl_context                  context,
+                                   cl_device_id                device,
+                                   const cl_queue_properties * properties,
+                                   cl_int *                    errcode_ret)
+{
+    if(!api.h) { cl_int r = clInit(); if(r) return 0; }
+    if(!api.clCreateCommandQueueWithProperties) { if(errcode_ret) *errcode_ret = CL_INVALID_COMMAND_QUEUE; return 0; }
+    else {
+        cl_command_queue v = api.clCreateCommandQueueWithProperties(context,device,properties,errcode_ret);
+        if(api.dumpFlags) printf("OPENCL-TRACE: clCreateCommandQueueWithProperties(%p, %p, %p, %p) => %p\n", context, device, properties, errcode_ret, v);
+        return v;
+    }
+}
+#endif
 
 CL_API_ENTRY cl_int CL_API_CALL
 clRetainCommandQueue(cl_command_queue  command_queue )
