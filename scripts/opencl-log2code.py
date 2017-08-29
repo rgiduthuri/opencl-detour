@@ -211,19 +211,43 @@ for line in open(inputLogFile, 'r'):
             dictKernelUse[kern].append(cmdq)
         enqueue = (dictKernel[kern], (dims, origin, globalWork, localWork))
         listGraph.append(enqueue)
+    elif 'OPENCL-TRACE: clEnqueueCopyBuffer(' in line:
+        param = GetParamList2(line)
+        cmdq = param[1]
+        buf1 = param[2]
+        buf2 = param[3]
+        soffset = int(param[4])
+        doffset = int(param[5])
+        bufsize = int(param[6])
+        enqueue = (('copy-buffer', buf1, buf2, soffset, doffset, bufsize))
+        listGraph.append(enqueue)
     elif 'OPENCL-TRACE: clFinish(' in line:
-        listGraphSaved = listGraph
-        listGraph = []
+        if len(listGraph) > 0:
+            listGraphSaved = listGraph
+            listGraph = []
+
+# get saved graph and number of kernel count
+listGraph = listGraphSaved
+numKern = 0
+for k in listGraph:
+    if len(k) == 2:
+        numKern = numKern + 1
 
 # get details of last job executed
 listGraphPrograms = []
 listGraphBuffers = []
-for k in listGraphSaved:
-    if not k[0][1] in listGraphPrograms:
-        listGraphPrograms.append(k[0][1])
-    for i in k[0][2]:
-        if (i[1] == 'buf') and (not i[2] in listGraphBuffers):
-            listGraphBuffers.append(i[2])
+for vk in listGraph:
+    if len(vk) == 2:
+        if not vk[0][1] in listGraphPrograms:
+            listGraphPrograms.append(vk[0][1])
+        for i in vk[0][2]:
+            if (i[1] == 'buf') and (not i[2] in listGraphBuffers):
+                listGraphBuffers.append(i[2])
+    elif vk[0][0] == 'copy-buffer':
+        if not vk[0][1] in listGraphBuffers:
+            listGraphBuffers.append(vk[0][1])
+        if not vk[0][2] in listGraphBuffers:
+            listGraphBuffers.append(vk[0][2])
 
 # generate .h file
 fpH.write('#ifndef __' + jobName + '_job_h__\n')
@@ -256,7 +280,7 @@ fpC.write('struct __' + handleType + ' {\n')
 fpC.write('    cl_context ctx;\n')
 fpC.write('    cl_command_queue cmdq;\n')
 fpC.write('    cl_mem buf[' + str(len(listGraphBuffers)) + '];\n')
-fpC.write('    cl_kernel kern[' + str(len(listGraphSaved)) + '];\n')
+fpC.write('    cl_kernel kern[' + str(numKern) + '];\n')
 fpC.write('};\n')
 fpC.write('\n')
 fpC.write('#define ERRCHK_ERNUL(call) if((err = (call)) != CL_SUCCESS) return error_rnul(job, err, __LINE__)\n')
@@ -339,9 +363,12 @@ for i, prog in enumerate(listGraphPrograms):
         fpC.write('    ERRCHK_ERNUL(err);\n')
     else:
         fpC.write('    ERRCHK_ERNUL(clBuildProgram(program, 1, &device_id, s_program_options_%s_%d, NULL, NULL));\n' % (jobName, i))
-    for ik, vk in enumerate(listGraphSaved):
-        if prog == vk[0][1]:
-            fpC.write('    ERRCHK_NRNUL(job->kern[%d] = clCreateKernel(program, "%s", &err));\n' % (ik, vk[0][0]))
+    ik = 0
+    for vk in listGraph:
+        if len(vk) == 2:
+            if prog == vk[0][1]:
+                fpC.write('    ERRCHK_NRNUL(job->kern[%d] = clCreateKernel(program, "%s", &err));\n' % (ik, vk[0][0]))
+            ik = ik + 1
     fpC.write('    ERRCHK_ERNUL(clReleaseProgram(program));\n')
 fpC.write('\n')
 for i, buff in enumerate(listGraphBuffers):
@@ -364,16 +391,19 @@ for i, buff in enumerate(listGraphBuffers):
         fpC.write('    ERRCHK_ERNUL(clEnqueueFillBuffer(cmdq, job->buf[%d], &zero, sizeof(zero), 0, %ld, 0, NULL, NULL));\n' % (i, v[1]))
 fpC.write('    ERRCHK_ERNUL(clFinish(cmdq));\n')
 fpC.write('\n')
-for i, vk in enumerate(listGraphSaved):
-    v = vk[0][2] # (name, programHandle, [(index,'buf'|'data',bufferHandle|<byte-array>), ...])
-    for a in v:
-        if a[1] == 'buf':
-            fpC.write('    ERRCHK_ERNUL(clSetKernelArg(job->kern[%d], %d, sizeof(cl_mem), &job->buf[%d]));\n' % (i, a[0], listGraphBuffers.index(a[2])))
-        elif a[1] == 'data':
-            fpC.write('    { cl_uint arg[] = {');
-            for d in a[2]:
-                fpC.write(' 0x%08x,' % (d))
-            fpC.write(' }; ERRCHK_ERNUL(clSetKernelArg(job->kern[%d], %d, sizeof(arg), arg)); }\n' % (i, a[0]))
+ik = 0
+for vk in listGraph:
+    if len(vk) == 2:
+        v = vk[0][2] # (name, programHandle, [(index,'buf'|'data',bufferHandle|<byte-array>), ...])
+        for a in v:
+            if a[1] == 'buf':
+                fpC.write('    ERRCHK_ERNUL(clSetKernelArg(job->kern[%d], %d, sizeof(cl_mem), &job->buf[%d]));\n' % (ik, a[0], listGraphBuffers.index(a[2])))
+            elif a[1] == 'data':
+                fpC.write('    { cl_uint arg[] = {');
+                for d in a[2]:
+                    fpC.write(' 0x%08x,' % (d))
+                fpC.write(' }; ERRCHK_ERNUL(clSetKernelArg(job->kern[%d], %d, sizeof(arg), arg)); }\n' % (ik, a[0]))
+        ik = ik + 1
 fpC.write('\n')
 fpC.write('    return job;\n')
 fpC.write('}\n')
@@ -383,7 +413,7 @@ fpC.write('{\n')
 fpC.write('    ' + handleType + ' job = *pGraph;\n')
 fpC.write('    cl_int err = 0;\n')
 fpC.write('\n')
-for i in range(len(listGraphSaved)):
+for i in range(numKern):
     fpC.write('    if(job->kern[%d]) ERRCHK_ERSET(clReleaseKernel(job->kern[%d]));\n' % (i, i))
 fpC.write('\n')
 for i in range(len(listGraphBuffers)):
@@ -403,37 +433,49 @@ fpC.write('int ' + jobName + 'Run(' + handleType + ' job)\n')
 fpC.write('{\n')
 fpC.write('    cl_int err;\n')
 fpC.write('\n')
-for ik, vk in enumerate(listGraphSaved): # (kernelHandle, dims, origin, globalWork, localWork)
-    dims = vk[1][0]
-    origin = vk[1][1]
-    globalWork = vk[1][2]
-    localWork = vk[1][3]
-    fpC.write('    {')
-    fpC.write(' size_t globalWork[%d] = {' % (dims))
-    for i in range(dims):
-        fpC.write(' %5d,' % (globalWork[i]))
-    fpC.write(' };')
-    if localWork[0] >= 0:
-        fpC.write(' size_t localWork[%d] = {' % (dims))
+ik = 0
+ic = 0
+for vk in listGraph: # (kernelHandle, dims, origin, globalWork, localWork)
+    if len(vk) == 2:
+        dims = vk[1][0]
+        origin = vk[1][1]
+        globalWork = vk[1][2]
+        localWork = vk[1][3]
+        fpC.write('    {')
+        fpC.write(' size_t globalWork[%d] = {' % (dims))
         for i in range(dims):
-            fpC.write(' %4d,' % (localWork[i]))
+            fpC.write(' %5d,' % (globalWork[i]))
         fpC.write(' };')
-    if origin[0] >= 0:
-        fpC.write(' size_t origin[%d] = {' % (dims))
-        for i in range(dims):
-            fpC.write(' %5d,' % (origin[i]))
-        fpC.write(' };')
-    fpC.write(' ERRCHK_ERERR_RT(clEnqueueNDRangeKernel(job->cmdq, job->kern[%4d], %d,' % (ik, dims))
-    if origin[0] >= 0:
-        fpC.write(' origin,')
-    else:
-        fpC.write(' NULL,')
-    fpC.write(' globalWork,')
-    if localWork[0] >= 0:
-        fpC.write(' localWork,')
-    else:
-        fpC.write(' NULL,')
-    fpC.write(' 0, NULL, NULL), %d); }\n' % (ik))
+        if localWork[0] >= 0:
+            fpC.write(' size_t localWork[%d] = {' % (dims))
+            for i in range(dims):
+                fpC.write(' %4d,' % (localWork[i]))
+            fpC.write(' };')
+        if origin[0] >= 0:
+            fpC.write(' size_t origin[%d] = {' % (dims))
+            for i in range(dims):
+                fpC.write(' %5d,' % (origin[i]))
+            fpC.write(' };')
+        fpC.write(' ERRCHK_ERERR_RT(clEnqueueNDRangeKernel(job->cmdq, job->kern[%4d], %d,' % (ik, dims))
+        if origin[0] >= 0:
+            fpC.write(' origin,')
+        else:
+            fpC.write(' NULL,')
+        fpC.write(' globalWork,')
+        if localWork[0] >= 0:
+            fpC.write(' localWork,')
+        else:
+            fpC.write(' NULL,')
+        fpC.write(' 0, NULL, NULL), %d); }\n' % (ic))
+        ik = ik + 1
+    elif vk[0] == 'copy-buffer':
+        buf1 = listGraphBuffers.index(vk[1])
+        buf2 = listGraphBuffers.index(vk[2])
+        soffset = vk[3]
+        doffset = vk[4]
+        bufsize = vk[5]
+        fpC.write('    ERRCHK_ERERR_RT(clEnqueueCopyBuffer(job->cmdq, job->buf[%d], job->buf[%d], %d, %d, %d, 0, NULL, NULL), %c);\n' % (buf1, buf2, soffset, doffset, bufsize, ic))
+    ic = ic + 1
 fpC.write('\n')
 fpC.write('    return 0;\n')
 fpC.write('}\n')
