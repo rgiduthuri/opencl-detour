@@ -322,10 +322,10 @@ for i, prog in enumerate(listGraphPrograms):
     v = dictProgram[prog]
     if v[0] == 'source':
         fpC.write('extern const char s_program_src_%s_%d[];\n' % (jobName, i))
+        fpC.write('extern const char s_program_options_%s_%d[];\n' % (jobName, i))
     else:
         fpC.write('extern const cl_uint s_program_bin_%s_%d[];\n' % (jobName, i))
         fpC.write('extern const size_t s_program_size_%s_%d;\n' % (jobName, i))
-    fpC.write('extern const char s_program_options_%s_%d[];\n' % (jobName, i))
 for i, buff in enumerate(listGraphBuffers):
     v = dictBuffer[buff]
     if len(v[2]) > 0:
@@ -352,17 +352,19 @@ fpC.write('    cl_program program;\n')
 for i, prog in enumerate(listGraphPrograms):
     v = dictProgram[prog]
     if v[0] == 'source':
+        options = 's_program_options_%s_%d' % (jobName, i)
         fpC.write('    const char * program_src_%d[] = { s_program_src_%s_%d };\n' % (i, jobName, i))
         fpC.write('    ERRCHK_NRNUL(program = clCreateProgramWithSource(job->ctx, 1, program_src_%d, NULL, &err));\n' % (i))
     else:
+        options = '""'
         fpC.write('    const unsigned char * program_bin_%d[] = { (const unsigned char *) s_program_bin_%s_%d };\n' % (i, jobName, i))
         fpC.write('    ERRCHK_NRNUL(program = clCreateProgramWithBinary(job->ctx, 1, &device_id, &s_program_size_%s_%d, program_bin_%d, NULL, &err));\n' % (jobName, i, i))
     if (debugFlags & 1):
-        fpC.write('    err = clBuildProgram(program, 1, &device_id, s_program_options_%s_%d, NULL, NULL);\n' % (jobName, i))
+        fpC.write('    err = clBuildProgram(program, 1, &device_id, %s, NULL, NULL);\n' % (options))
         fpC.write('    if(err) dumpBuildInfo(program, device_id);\n')
         fpC.write('    ERRCHK_ERNUL(err);\n')
     else:
-        fpC.write('    ERRCHK_ERNUL(clBuildProgram(program, 1, &device_id, s_program_options_%s_%d, NULL, NULL));\n' % (jobName, i))
+        fpC.write('    ERRCHK_ERNUL(clBuildProgram(program, 1, &device_id, %s, NULL, NULL));\n' % (options))
     ik = 0
     for vk in listGraph:
         if len(vk) == 2:
@@ -444,19 +446,23 @@ for vk in listGraph: # (kernelHandle, dims, origin, globalWork, localWork)
         fpC.write('    {')
         fpC.write(' size_t globalWork[%d] = {' % (dims))
         for i in range(dims):
-            fpC.write(' %5d,' % (globalWork[i]))
+            fpC.write(' %d,' % (globalWork[i]))
         fpC.write(' };')
         if localWork[0] >= 0:
             fpC.write(' size_t localWork[%d] = {' % (dims))
             for i in range(dims):
-                fpC.write(' %4d,' % (localWork[i]))
+                fpC.write(' %d,' % (localWork[i]))
             fpC.write(' };')
+        if (dims == 3) and (origin[0] == 0) and (origin[1] == 0) and (origin[2] == 0):
+            origin[0] = -1
+            origin[1] = -1
+            origin[2] = -1
         if origin[0] >= 0:
             fpC.write(' size_t origin[%d] = {' % (dims))
             for i in range(dims):
-                fpC.write(' %5d,' % (origin[i]))
+                fpC.write(' %d,' % (origin[i]))
             fpC.write(' };')
-        fpC.write(' ERRCHK_ERERR_RT(clEnqueueNDRangeKernel(job->cmdq, job->kern[%4d], %d,' % (ik, dims))
+        fpC.write(' ERRCHK_ERERR_RT(clEnqueueNDRangeKernel(job->cmdq, job->kern[%d], %d,' % (ik, dims))
         if origin[0] >= 0:
             fpC.write(' origin,')
         else:
@@ -474,7 +480,7 @@ for vk in listGraph: # (kernelHandle, dims, origin, globalWork, localWork)
         soffset = vk[3]
         doffset = vk[4]
         bufsize = vk[5]
-        fpC.write('    ERRCHK_ERERR_RT(clEnqueueCopyBuffer(job->cmdq, job->buf[%d], job->buf[%d], %d, %d, %d, 0, NULL, NULL), %c);\n' % (buf1, buf2, soffset, doffset, bufsize, ic))
+        fpC.write('    ERRCHK_ERERR_RT(clEnqueueCopyBuffer(job->cmdq, job->buf[%d], job->buf[%d], %d, %d, %d, 0, NULL, NULL), %d);\n' % (buf1, buf2, soffset, doffset, bufsize, ic))
     ic = ic + 1
 fpC.write('\n')
 fpC.write('    return 0;\n')
@@ -484,6 +490,7 @@ for i, prog in enumerate(listGraphPrograms):
     v = dictProgram[prog]
     if v[0] == 'source':
         fpC.write('const char s_program_src_%s_%d[] = "%s";\n' % (jobName, i, v[4]))
+        fpC.write('const char s_program_options_%s_%d[] = "%s";\n' % (jobName, i, v[1]))
     else:
         if len(v[4]) != 1:
             print('ERROR: this implementation supports program binaries on one device only')
@@ -492,7 +499,6 @@ for i, prog in enumerate(listGraphPrograms):
             fpC.write(' %s,' % (j))
         fpC.write(' };\n')
         fpC.write('const size_t s_program_size_%s_%d = %d;\n' % (jobName, i, int(v[4][0][0])))
-    fpC.write('const char s_program_options_%s_%d[] = "%s";\n' % (jobName, i, v[1]))
 for i, buff in enumerate(listGraphBuffers):
     v = dictBuffer[buff]
     if len(v[2]) > 2:
@@ -668,10 +674,10 @@ fpB.write('add_executable(' + jobName + ' ${SOURCES})\n')
 fpB.write('include_directories(${OpenCL_INCLUDE_DIRS} ${OpenCL_INCLUDE_DIRS}/Headers)\n')
 fpB.write('target_link_libraries(' + jobName + ' ${OpenCL_LIBRARIES})\n')
 fpB.write('if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")\n')
-fpB.write('	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")\n')
-fpB.write('	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")\n')
+fpB.write('    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")\n')
+fpB.write('    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")\n')
 fpB.write('else()\n')
-fpB.write('	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")\n')
+fpB.write('    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")\n')
 fpB.write('endif()\n')
 
 # close files
