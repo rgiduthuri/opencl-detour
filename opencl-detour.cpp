@@ -1360,7 +1360,7 @@ clCreateProgramWithBinary(cl_context                      context ,
     else {
         cl_program v = api.clCreateProgramWithBinary(context,num_devices,device_list,lengths,binaries,binary_status,errcode_ret);
         if(api.dumpFlags) printf("OPENCL-TRACE: clCreateProgramWithBinary(%p, %u, %p, %p, %p, %p, %p) => %p\n", context, num_devices, device_list, lengths, binaries, binary_status, errcode_ret, v);
-        if(api.dumpFlags > 1) for (cl_uint i = 0; i < num_devices; i++) { printf("OPENCL-TRACE: PROGRAM-BINARY %p %p %ld ", v, device_list[i], lengths[i]); for(size_t j = 0; j < (lengths[i]+sizeof(cl_uint)-1)/sizeof(cl_uint); j++) printf(" 0x%08x", ((const cl_uint *)binaries[i])[j]); printf("\n"); }
+        if(api.dumpFlags > 1) for (cl_uint i = 0; i < num_devices; i++) { printf("OPENCL-TRACE: PROGRAM-BINARY %p %p %ld", v, device_list[i], lengths[i]); for(size_t j = 0; j < (lengths[i]+sizeof(cl_uint)-1)/sizeof(cl_uint); j++) printf(" 0x%08x", ((const cl_uint *)binaries[i])[j]); printf("\n"); }
         return v;
     }
 }
