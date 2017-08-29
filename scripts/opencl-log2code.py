@@ -58,32 +58,29 @@ fpB = open(outputFolder + '/CMakeLists.txt', 'w')
 #   dictProgram[programHandle] = ('source', options, [build-dev-list], [], <string>) or ('binary', options, [build-dev-list], [dev-list], [init-values])
 #   dictBuffer[bufferHandle] = (flags, size, [init-values])
 #   dictKernel[kernelHandle] = (name, programHandle, [(index,'buf'|'data',bufferHandle|[init-values]), ...])
-#   dictCmdQ[cmdqHandle] = [(kernelHandle, dims, origin, globalWork, localWork), ...]
 #   dictDevice[devHandle] = cmdq
 #   dictName[handle] = name
 #   dictBufferUse[bufferHandle] = [kerneHandle-list]
-#   dictKernelUse[kernelHandle] = [cmdqHandle-list]
+#   dictKernelNameCount[kernelHandle] = count
 dictProgram = {}
 dictBuffer = {}
 dictKernel = {}
-dictCmdQ = {}
 dictDevice = {}
 dictName = {}
 dictBufferUse = {}
-dictKernelUse = {}
+dictKernelNameCount = {}
 listBuffer = []
 listKernel = []
 listProgram = []
-listCmdQ = []
 listGraph = []
 listGraphSaved = []
 
 # utility functions
 def GetParamList(line):
-    return line.replace(' => ', ',').replace('(', ',').replace(')', '.').replace(' ', '').split(',')
+    return line.replace(' => ', ',').replace('(', ',').replace(')', '').replace(' ', '').split(',')
 
 def GetParamList2(line):
-    return line.replace(' => ', ',').replace('(', ',').replace(')', '.').replace(' ', '').replace('{', '').replace('}', '').split(',')
+    return line.replace(' => ', ',').replace('(', ',').replace(')', '').replace(' ', '').replace('{', '').replace('}', '').split(',')
 
 def GenerateName(prefix):
     GenerateName.count += 1
@@ -106,8 +103,6 @@ for line in open(inputLogFile, 'r'):
         device = param[2]
         cmdq = param[5]
         dictDevice[device] = cmdq
-        dictCmdQ[cmdq] = []
-        listCmdQ.append(cmdq)
     elif 'OPENCL-TRACE: clCreateProgramWithSource(' in line:
         param = GetParamList(line)
         prog = param[6]
@@ -165,8 +160,22 @@ for line in open(inputLogFile, 'r'):
         name = param[2][1:-1]
         kern = param[4]
         dictKernel[kern] = (name, prog, [])
-        dictKernelUse[kern] = []
         listKernel.append(kern)
+        if kern in dictKernelNameCount:
+            dictKernelNameCount[kern] = dictKernelNameCount[kern] + 1
+        else:
+            dictKernelNameCount[kern] = 1
+    elif 'OPENCL-TRACE: clReleaseKernel(' in line:
+        param = GetParamList(line)
+        kern = param[1]
+        kernNew = kern + 'K' + str(dictKernelNameCount[kern])
+        dictKernel[kernNew] = dictKernel[kern]
+        for ie in range(len(listGraph)):
+            if listGraph[ie][0] == dictKernel[kern]:
+              listGraph[ie] = [dictKernel[kernNew], listGraph[ie][1]]
+        listKernel.append(kernNew)
+        del dictKernel[kern]
+        listKernel.remove(kern)
     elif 'OPENCL-TRACE: KERNARG ' in line:
         param = line.split(' ')
         kern = param[2]
@@ -205,11 +214,7 @@ for line in open(inputLogFile, 'r'):
             origin.append(int(param[4 + dim + dims * 0]))
             globalWork.append(int(param[4 + dim + dims * 1]))
             localWork.append(int(param[4 + dim + dims * 2]))
-        enqueue = (kern, dims, origin, globalWork, localWork)
-        dictCmdQ[cmdq].append(enqueue)
-        if not cmdq in dictKernelUse[kern]:
-            dictKernelUse[kern].append(cmdq)
-        enqueue = (dictKernel[kern], (dims, origin, globalWork, localWork))
+        enqueue = [dictKernel[kern], (dims, origin, globalWork, localWork)]
         listGraph.append(enqueue)
     elif 'OPENCL-TRACE: clEnqueueCopyBuffer(' in line:
         param = GetParamList2(line)
