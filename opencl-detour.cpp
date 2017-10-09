@@ -12,7 +12,7 @@
 #elif defined(__APPLE__)
 #define OPENCL_TRACE_LIBRARY "/System/Library/Frameworks/OpenCL.framework/Versions/A/OpenCL"
 #else
-#define OPENCL_TRACE_LIBRARY "/opt/rocm/opencl/lib/x86_64/libOpenCL.so"
+#define OPENCL_TRACE_LIBRARY "/opt/rocm/opencl/lib/x86_64/libOpenCL.so.1"
 #endif
 #endif
 
