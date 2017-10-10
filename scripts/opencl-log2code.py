@@ -73,11 +73,6 @@ dictDevice = {}
 dictName = {}
 dictBufferUse = {}
 dictKernelNameCount = {}
-listBuffer = []
-listKernel = []
-listProgram = []
-listGraph = []
-listGraphSaved = []
 
 # utility functions
 def GetParamList(line):
@@ -90,6 +85,19 @@ def GenerateName(prefix):
     GenerateName.count += 1
     return prefix + '%05d' % (GenerateName.count - 1)
 GenerateName.count = 0
+
+# save command buffer
+commandBuffer = []
+commandBufferSaved = []
+def saveCommandBuffer(v):
+    if v[0] == 'copy-buffer':
+        cmd = ['copy', v[1], v[2], v[3], v[4], v[5]]
+    else:
+        arg = []
+        for i in v[0][2]:
+            arg.append(i)
+        cmd = ['kern', v[0][1], v[0][0], arg, v[1]]
+    commandBuffer.append(cmd)
 
 # parse the log file
 enableNDRange = True
@@ -111,7 +119,6 @@ for line in open(inputLogFile, 'r'):
         param = GetParamList(line)
         prog = param[6]
         dictProgram[prog] = ['source', '', [], [], '']
-        listProgram.append(prog)
     elif 'OPENCL-TRACE: PROGRAM-SOURCE' in line:
         prog = line.split(' ')[2]
         code = line[line.index('"')+1:-1]
@@ -120,7 +127,6 @@ for line in open(inputLogFile, 'r'):
         param = GetParamList(line)
         prog = param[8]
         dictProgram[prog] = ['binary', '', [], [], []]
-        listProgram.append(prog)
     elif 'OPENCL-TRACE: PROGRAM-BINARY' in line:
         params = line.split(' ')
         prog = params[2]
@@ -148,7 +154,6 @@ for line in open(inputLogFile, 'r'):
         buff = param[6]
         dictBuffer[buff] = (flags, size, [])
         dictBufferUse[buff] = []
-        listBuffer.append(buff)
     elif 'OPENCL-TRACE: BUFFER-WRITE' in line:
         params = line.split(' ')
         cmdq = params[2]
@@ -164,7 +169,6 @@ for line in open(inputLogFile, 'r'):
         name = param[2][1:-1]
         kern = param[4]
         dictKernel[kern] = (name, prog, [])
-        listKernel.append(kern)
         if kern in dictKernelNameCount:
             dictKernelNameCount[kern] = dictKernelNameCount[kern] + 1
         else:
@@ -174,12 +178,7 @@ for line in open(inputLogFile, 'r'):
         kern = param[1]
         kernNew = kern + 'K' + str(dictKernelNameCount[kern])
         dictKernel[kernNew] = dictKernel[kern]
-        for ie in range(len(listGraph)):
-            if listGraph[ie][0] == dictKernel[kern]:
-              listGraph[ie] = [dictKernel[kernNew], listGraph[ie][1]]
-        listKernel.append(kernNew)
         del dictKernel[kern]
-        listKernel.remove(kern)
     elif 'OPENCL-TRACE: KERNARG ' in line:
         param = line.split(' ')
         kern = param[2]
@@ -188,16 +187,16 @@ for line in open(inputLogFile, 'r'):
         if size == 8:
             if param[5] in dictBuffer:
                 buff = param[5]
-                v = (arg, 'buf', buff)
+                v = (arg, 'buf', buff, lineno)
                 if not kern in dictBufferUse[buff]:
                     dictBufferUse[buff].append(kern)
             else:
-                v = (arg, 'data', [ int(param[5], 0) & 0xffffffff, int(param[5], 0) >> 32])
+                v = (arg, 'data', [ int(param[5], 0) & 0xffffffff, int(param[5], 0) >> 32], lineno)
         else:
             v = []
             for i in param[5:]:
                 v.append(int(i, 0))
-            v = (arg, 'data', v)
+            v = (arg, 'data', v, lineno)
         kv = dictKernel[kern]
         vv = kv[2]
         for i, iv in enumerate(vv):
@@ -218,8 +217,8 @@ for line in open(inputLogFile, 'r'):
             origin.append(int(param[4 + dim + dims * 0]))
             globalWork.append(int(param[4 + dim + dims * 1]))
             localWork.append(int(param[4 + dim + dims * 2]))
-        enqueue = [dictKernel[kern], (dims, origin, globalWork, localWork)]
-        listGraph.append(enqueue)
+        enqueue = [dictKernel[kern], (dims, origin, globalWork, localWork, lineno)]
+        saveCommandBuffer(enqueue)
     elif 'OPENCL-TRACE: clEnqueueCopyBuffer(' in line:
         param = GetParamList2(line)
         cmdq = param[1]
@@ -229,82 +228,48 @@ for line in open(inputLogFile, 'r'):
         doffset = int(param[5])
         bufsize = int(param[6])
         enqueue = (('copy-buffer', buf1, buf2, soffset, doffset, bufsize))
-        listGraph.append(enqueue)
+        saveCommandBuffer(enqueue)
     elif 'OPENCL-TRACE: clFinish(' in line:
-        if len(listGraph) > 0:
-            listGraphSaved = listGraph
-            listGraph = []
+        if len(commandBuffer) > 0:
+            commandBufferSaved = commandBuffer
+            commandBuffer = []
 
-# get saved graph and number of kernel count
-listGraph = listGraphSaved
-numKern = 0
-numCopy = 0
-for vk in listGraph:
-    if len(vk) == 2:
-        numKern = numKern + 1
-    elif vk[0][0] == 'copy-buffer':
-        numCopy = numCopy + 1
-
-# get details of last job executed
-listGraphPrograms = []
-listGraphBuffers = []
-for vk in listGraph:
-    if len(vk) == 2:
-        if not vk[0][1] in listGraphPrograms:
-            listGraphPrograms.append(vk[0][1])
-        for i in vk[0][2]:
-            if (i[1] == 'buf') and (not i[2] in listGraphBuffers):
-                listGraphBuffers.append(i[2])
-    elif vk[0][0] == 'copy-buffer':
-        if not vk[0][1] in listGraphBuffers:
-            listGraphBuffers.append(vk[0][1])
-        if not vk[0][2] in listGraphBuffers:
-            listGraphBuffers.append(vk[0][2])
-
-# identify re-usable program code
-listProgSrcCode = []
-dictProgSrcIndex = {}
-listProgOptCode = []
-dictProgOptIndex = {}
-listProgBinCode = []
-dictProgBinIndex = {}
-for i, prog in enumerate(listGraphPrograms):
-    v = dictProgram[prog]
-    if v[0] == 'source':
-        index = -1
-        if removeDuplicateCode:
-            for it, vt in enumerate(listProgSrcCode):
-                if vt[1] == v[4]:
-                    index = vt[0]
-                    break
-        if index < 0:
-            index = i
-            if removeDuplicateCode:
-                listProgSrcCode.append((index, v[4]))
-        dictProgSrcIndex[i] = index
-        index = -1
-        if removeDuplicateCode:
-            for it, vt in enumerate(listProgOptCode):
-                if vt[1] == v[1]:
-                    index = vt[0]
-                    break
-        if index < 0:
-            index = i
-            if removeDuplicateCode:
-                listProgOptCode.append((index, v[1]))
-        dictProgOptIndex[i] = index
-    else:
-        index = -1
-        if removeDuplicateCode:
-            for it, vt in enumerate(listProgBinCode):
-                if vt[1] == v[4][0]:
-                    index = vt[0]
-                    break
-        if index < 0:
-            index = i
-            if removeDuplicateCode:
-                listProgBinCode.append((index, v[4][0]))
-        dictProgBinIndex[i] = index
+# get number of kernel and buffer objects
+commandBuffer = commandBufferSaved
+countKern = 0
+countCopy = 0
+bufferList = []
+programList = []
+bufferUsage = []
+for ic, cmd in enumerate(commandBuffer):
+    if cmd[0] == 'copy':
+        countCopy = countCopy + 1
+        bufUse = [cmd[1], cmd[2]]
+    elif cmd[0] == 'kern':
+        countKern = countKern + 1
+        prog = cmd[1]
+        if not prog in programList:
+            found = prog
+            vprog = dictProgram[prog]
+            for p in programList:
+                vp = dictProgram[p]
+                if (vp[0] == vprog[0]) and (vp[1] == vprog[1]) and (vp[4] == vprog[4]):
+                    found = p
+            if found != prog:
+                commandBuffer[ic][1] = found
+            else:
+                programList.append(prog)
+        bufUse = []
+        for a in cmd[3]:
+            if a[1] == 'buf':
+                bufUse.append(a[2])
+    for buf in bufUse:
+        if not buf in bufferList:
+            bufferList.append(buf)
+    bufferUsage.append(bufUse)
+countBuffer = len(bufferList)
+countProgram = len(programList)
+countCommand = len(commandBuffer)
 
 # generate .h file
 fpH.write('#ifndef __' + jobName + '_job_h__\n')
@@ -336,8 +301,8 @@ fpC.write('\n')
 fpC.write('struct __' + handleType + ' {\n')
 fpC.write('    cl_context ctx;\n')
 fpC.write('    cl_command_queue cmdq;\n')
-fpC.write('    cl_mem buf[' + str(len(listGraphBuffers)) + '];\n')
-fpC.write('    cl_kernel kern[' + str(numKern) + '];\n')
+fpC.write('    cl_mem buf[' + str(countBuffer) + '];\n')
+fpC.write('    cl_kernel kern[' + str(countKern) + '];\n')
 fpC.write('};\n')
 fpC.write('\n')
 fpC.write('#define ERRCHK_ERNUL(call) if((err = (call)) != CL_SUCCESS) return error_rnul(job, err, __LINE__)\n')
@@ -375,25 +340,22 @@ if (debugFlags & 1):
     fpC.write('    delete[] log;\n')
     fpC.write('}\n')
 fpC.write('\n')
-for i, prog in enumerate(listGraphPrograms):
+for i, prog in enumerate(programList):
     v = dictProgram[prog]
     if v[0] == 'source':
-        if dictProgSrcIndex[i] == i:
-            fpC.write('extern const char s_program_src_%s_%d[];\n' % (jobName, i))
-        if dictProgOptIndex[i] == i:
-            fpC.write('extern const char s_program_options_%s_%d[];\n' % (jobName, i))
+        fpC.write('extern const char s_program_src_%s_%d[];\n' % (jobName, i))
+        fpC.write('extern const char s_program_options_%s_%d[];\n' % (jobName, i))
     else:
-        if dictProgBinIndex[i] == i:
-            fpC.write('extern const cl_uint s_program_bin_%s_%d[];\n' % (jobName, i))
-            fpC.write('extern const size_t s_program_size_%s_%d;\n' % (jobName, i))
-for i, buff in enumerate(listGraphBuffers):
+        fpC.write('extern const cl_uint s_program_bin_%s_%d[];\n' % (jobName, i))
+        fpC.write('extern const size_t s_program_size_%s_%d;\n' % (jobName, i))
+for i, buff in enumerate(bufferList):
     v = dictBuffer[buff]
     if len(v[2]) > 0:
         fpC.write('extern cl_uint s_buffer_bin_%s_%d[];\n' % (jobName, i))
 fpC.write('\n')
 fpC.write('size_t ' + jobName + 'GetNumBuffer()\n')
 fpC.write('{\n')
-fpC.write('    return ' + str(len(listGraphBuffers)) + ';\n')
+fpC.write('    return ' + str(countBuffer) + ';\n')
 fpC.write('}\n')
 fpC.write('\n')
 fpC.write(handleType + ' ' + jobName + 'Create(cl_command_queue cmdq)\n')
@@ -409,16 +371,16 @@ fpC.write('    cl_device_id device_id = NULL;\n')
 fpC.write('    ERRCHK_ERNUL(clGetCommandQueueInfo(cmdq, CL_QUEUE_DEVICE, sizeof(cl_device_id), &device_id, NULL));\n')
 fpC.write('\n')
 fpC.write('    cl_program program;\n')
-for i, prog in enumerate(listGraphPrograms):
+for i, prog in enumerate(programList):
     v = dictProgram[prog]
     if v[0] == 'source':
-        options = 's_program_options_%s_%d' % (jobName, dictProgOptIndex[i])
-        fpC.write('    const char * program_src_%d[] = { s_program_src_%s_%d };\n' % (i, jobName, dictProgSrcIndex[i]))
+        options = 's_program_options_%s_%d' % (jobName, i)
+        fpC.write('    const char * program_src_%d[] = { s_program_src_%s_%d };\n' % (i, jobName, i))
         fpC.write('    ERRCHK_NRNUL(program = clCreateProgramWithSource(job->ctx, 1, program_src_%d, NULL, &err));\n' % (i))
     else:
         options = '""'
-        fpC.write('    const unsigned char * program_bin_%d[] = { (const unsigned char *) s_program_bin_%s_%d };\n' % (i, jobName, dictProgBinIndex[i]))
-        fpC.write('    ERRCHK_NRNUL(program = clCreateProgramWithBinary(job->ctx, 1, &device_id, &s_program_size_%s_%d, program_bin_%d, NULL, &err));\n' % (jobName, dictProgBinIndex[i], i))
+        fpC.write('    const unsigned char * program_bin_%d[] = { (const unsigned char *) s_program_bin_%s_%d };\n' % (i, jobName, i))
+        fpC.write('    ERRCHK_NRNUL(program = clCreateProgramWithBinary(job->ctx, 1, &device_id, &s_program_size_%s_%d, program_bin_%d, NULL, &err));\n' % (jobName, i, i))
     if (debugFlags & 1):
         fpC.write('    err = clBuildProgram(program, 1, &device_id, %s, NULL, NULL);\n' % (options))
         fpC.write('    if(err) dumpBuildInfo(program, device_id);\n')
@@ -426,14 +388,14 @@ for i, prog in enumerate(listGraphPrograms):
     else:
         fpC.write('    ERRCHK_ERNUL(clBuildProgram(program, 1, &device_id, %s, NULL, NULL));\n' % (options))
     ik = 0
-    for vk in listGraph:
-        if len(vk) == 2:
-            if prog == vk[0][1]:
-                fpC.write('    ERRCHK_NRNUL(job->kern[%d] = clCreateKernel(program, "%s", &err));\n' % (ik, vk[0][0]))
+    for vk in commandBuffer:
+        if vk[0] == 'kern':
+            if prog == vk[1]:
+                fpC.write('    ERRCHK_NRNUL(job->kern[%d] = clCreateKernel(program, "%s", &err));\n' % (ik, vk[2]))
             ik = ik + 1
     fpC.write('    ERRCHK_ERNUL(clReleaseProgram(program));\n')
 fpC.write('\n')
-for i, buff in enumerate(listGraphBuffers):
+for i, buff in enumerate(bufferList):
     v = dictBuffer[buff]
     flags = 'UNSUPPORTED_' + str(v[0])
     if v[0] == 1:
@@ -445,7 +407,7 @@ for i, buff in enumerate(listGraphBuffers):
     fpC.write('    ERRCHK_NRNUL(job->buf[%d] = clCreateBuffer(job->ctx, %s, %d, NULL, &err));\n' % (i, flags, v[1]))
 fpC.write('\n')
 fpC.write('    cl_uint zero = 0;\n')
-for i, buff in enumerate(listGraphBuffers):
+for i, buff in enumerate(bufferList):
     v = dictBuffer[buff]
     if len(v[2]) > 0:
         fpC.write('    ERRCHK_ERNUL(clEnqueueWriteBuffer(cmdq, job->buf[%d], CL_FALSE, 0, %ld, s_buffer_bin_%s_%d, 0, NULL, NULL));\n' % (i, v[1], jobName, i))
@@ -454,12 +416,12 @@ for i, buff in enumerate(listGraphBuffers):
 fpC.write('    ERRCHK_ERNUL(clFinish(cmdq));\n')
 fpC.write('\n')
 ik = 0
-for vk in listGraph:
-    if len(vk) == 2:
-        v = vk[0][2] # (name, programHandle, [(index,'buf'|'data',bufferHandle|<byte-array>), ...])
+for vk in commandBuffer:
+    if vk[0] == 'kern':
+        v = vk[3] # (name, programHandle, [(index,'buf'|'data',bufferHandle|<byte-array>), ...])
         for a in v:
             if a[1] == 'buf':
-                fpC.write('    ERRCHK_ERNUL(clSetKernelArg(job->kern[%d], %d, sizeof(cl_mem), &job->buf[%d]));\n' % (ik, a[0], listGraphBuffers.index(a[2])))
+                fpC.write('    ERRCHK_ERNUL(clSetKernelArg(job->kern[%d], %d, sizeof(cl_mem), &job->buf[%d])); // line#%d\n' % (ik, a[0], bufferList.index(a[2]), a[3]))
             elif a[1] == 'data':
                 fpC.write('    { cl_uint arg[] = {');
                 for d in a[2]:
@@ -475,10 +437,10 @@ fpC.write('{\n')
 fpC.write('    ' + handleType + ' job = *pGraph;\n')
 fpC.write('    cl_int err = 0;\n')
 fpC.write('\n')
-for i in range(numKern):
+for i in range(countKern):
     fpC.write('    if(job->kern[%d]) ERRCHK_ERSET(clReleaseKernel(job->kern[%d]));\n' % (i, i))
 fpC.write('\n')
-for i in range(len(listGraphBuffers)):
+for i in range(countBuffer):
     fpC.write('    if(job->buf[%d]) ERRCHK_ERSET(clReleaseMemObject(job->buf[%d]));\n' % (i, i))
 fpC.write('\n')
 fpC.write('    delete job;\n')
@@ -488,7 +450,7 @@ fpC.write('}\n')
 fpC.write('\n')
 fpC.write('cl_mem ' + jobName + 'GetMem(' + handleType + ' job, size_t index)\n')
 fpC.write('{\n')
-fpC.write('    return (index < %d) ? job->buf[index] : NULL;\n' % (len(listGraphBuffers)))
+fpC.write('    return (index < %d) ? job->buf[index] : NULL;\n' % (countBuffer))
 fpC.write('}\n')
 fpC.write('\n')
 fpC.write('int ' + jobName + 'Run(' + handleType + ' job)\n')
@@ -497,12 +459,13 @@ fpC.write('    cl_int err;\n')
 fpC.write('\n')
 ik = 0
 ic = 0
-for vk in listGraph: # (kernelHandle, dims, origin, globalWork, localWork)
-    if len(vk) == 2:
-        dims = vk[1][0]
-        origin = vk[1][1]
-        globalWork = vk[1][2]
-        localWork = vk[1][3]
+for vk in commandBuffer: # (kernelHandle, dims, origin, globalWork, localWork)
+    if vk[0] == 'kern':
+        dims = vk[4][0]
+        origin = vk[4][1]
+        globalWork = vk[4][2]
+        localWork = vk[4][3]
+        code = vk[4][4]
         fpC.write('    {')
         fpC.write(' size_t globalWork[%d] = {' % (dims))
         for i in range(dims):
@@ -532,11 +495,11 @@ for vk in listGraph: # (kernelHandle, dims, origin, globalWork, localWork)
             fpC.write(' localWork,')
         else:
             fpC.write(' NULL,')
-        fpC.write(' 0, NULL, NULL), %d); }\n' % (ic))
+        fpC.write(' 0, NULL, NULL), %d); } // line#%d\n' % (ic, code))
         ik = ik + 1
-    elif vk[0] == 'copy-buffer':
-        buf1 = listGraphBuffers.index(vk[1])
-        buf2 = listGraphBuffers.index(vk[2])
+    elif vk[0] == 'copy':
+        buf1 = bufferList.index(vk[1])
+        buf2 = bufferList.index(vk[2])
         soffset = vk[3]
         doffset = vk[4]
         bufsize = vk[5]
@@ -550,30 +513,27 @@ numProgSrc = 0
 numProgBin = 0
 totalProgSrc = 0
 totalProgBin = 0
-for i, prog in enumerate(listGraphPrograms):
+for i, prog in enumerate(programList):
     v = dictProgram[prog]
     if v[0] == 'source':
-        if dictProgSrcIndex[i] == i:
-            fpC.write('const char s_program_src_%s_%d[] = "%s";\n' % (jobName, i, v[4]))
-            totalProgSrc = totalProgSrc + len(v[4])
-            numProgSrc = numProgSrc + 1
-        if dictProgOptIndex[i] == i:
-            fpC.write('const char s_program_options_%s_%d[] = "%s";\n' % (jobName, i, v[1]))
-            totalProgSrc = totalProgSrc + len(v[1])
+        fpC.write('const char s_program_src_%s_%d[] = "%s";\n' % (jobName, i, v[4]))
+        totalProgSrc = totalProgSrc + len(v[4])
+        numProgSrc = numProgSrc + 1
+        fpC.write('const char s_program_options_%s_%d[] = "%s";\n' % (jobName, i, v[1]))
+        totalProgSrc = totalProgSrc + len(v[1])
     else:
-        if dictProgBinIndex[i] == i:
-            if len(v[4]) != 1:
-                print('ERROR: this implementation supports program binaries on one device only')
-            fpC.write('const cl_uint s_program_bin_%s_%d[] = {' % (jobName, i))
-            for j in v[4][0][1:]:
-                fpC.write(' %s,' % (j))
-            fpC.write(' };\n')
-            fpC.write('const size_t s_program_size_%s_%d = %d;\n' % (jobName, i, int(v[4][0][0])))
-            numProgBin = numProgBin + 1
-            totalProgBin = totalProgBin + int(v[4][0][0])
+        if len(v[4]) != 1:
+            print('ERROR: this implementation supports program binaries on one device only')
+        fpC.write('const cl_uint s_program_bin_%s_%d[] = {' % (jobName, i))
+        for j in v[4][0][1:]:
+            fpC.write(' %s,' % (j))
+        fpC.write(' };\n')
+        fpC.write('const size_t s_program_size_%s_%d = %d;\n' % (jobName, i, int(v[4][0][0])))
+        numProgBin = numProgBin + 1
+        totalProgBin = totalProgBin + int(v[4][0][0])
 totalBufferAlloc = 0
 totalBufferInit = 0
-for i, buff in enumerate(listGraphBuffers):
+for i, buff in enumerate(bufferList):
     v = dictBuffer[buff]
     if len(v[2]) > 2:
         fpC.write('cl_uint s_buffer_bin_%s_%d[] = {' % (jobName, i))
@@ -582,10 +542,10 @@ for i, buff in enumerate(listGraphBuffers):
         fpC.write(' };\n')
         totalBufferInit = totalBufferInit + v[1]
     totalBufferAlloc = totalBufferAlloc + v[1]
-print('OK: job allocates %d buffers (%d bytes allocation with %d bytes pre-initialized)' % (len(listGraphBuffers), totalBufferAlloc, totalBufferInit))
-print('OK: job uses %d kernels created from %d programs (unique %d source + %d binary) with %d bytes of code size' % (numKern, len(listGraphPrograms), numProgSrc, numProgBin, totalProgSrc + totalProgBin))
-if numCopy > 0:
-    print('OK: job uses %d buffer copies' % (numCopy))
+print('OK: job allocates %d buffers (%d bytes allocation with %d bytes pre-initialized)' % (countBuffer, totalBufferAlloc, totalBufferInit))
+print('OK: job uses %d kernels created from %d programs (unique %d source + %d binary) with %d bytes of code size' % (countKern, countProgram, numProgSrc, numProgBin, totalProgSrc + totalProgBin))
+if countCopy > 0:
+    print('OK: job uses %d buffer copies' % (countCopy))
 
 # generate _main.cpp
 fpM.write('#include "' + jobName + '_job.h"\n')
